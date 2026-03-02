@@ -3,7 +3,7 @@
 #include <chrono>
 #include <cctype>
 #include <cstdint>
-#include <cstdlib>
+#include <cstring>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
@@ -16,24 +16,21 @@ volatile BOOL g_shouldRun = TRUE;
 struct Config {
     std::string port;
     DWORD baud = 115200;
-    bool raw = false;
-    bool hex = false;
-    bool stripAnsi = true;
+    bool hex = true;
+    bool ascii = false;
     bool stats = false;
 };
 
 void PrintUsage(const char* exe) {
     std::cout << "Usage:\n"
-              << "  " << exe << " --port COM5 --baud 115200 [--raw] [--hex] [--strip-ansi] [--no-strip-ansi] [--stats]\n\n"
+              << "  " << exe << " --port COM5 --baud 115200 [--hex] [--ascii] [--stats]\n\n"
               << "Options:\n"
-              << "  --port <COMx>       Required. Serial port (example: COM5)\n"
-              << "  --baud <rate>       Optional. Baud rate (default: 115200)\n"
-              << "  --raw               Optional. Print raw receive chunks instead of parsed log lines\n"
-              << "  --hex               Optional. Show hex dump for received bytes (typically with --raw)\n"
-              << "  --strip-ansi        Optional. Remove ANSI escape sequences (default: on)\n"
-              << "  --no-strip-ansi     Optional. Preserve ANSI escape sequences\n"
-              << "  --stats             Optional. Print bytes/sec every 1 second\n"
-              << "  --help              Show this help\n";
+              << "  --port <COMx>   Required. Serial port (example: COM5)\n"
+              << "  --baud <rate>   Optional. Baud rate (default: 115200)\n"
+              << "  --hex           Optional. Print hex dump (default: on)\n"
+              << "  --ascii         Optional. Print printable ASCII alongside hex\n"
+              << "  --stats         Optional. Print bytes/sec every 1 second\n"
+              << "  --help          Show this help\n";
 }
 
 bool ParseUnsigned(const std::string& value, DWORD& out) {
@@ -54,7 +51,6 @@ bool ParseUnsigned(const std::string& value, DWORD& out) {
 bool ParseArgs(int argc, char** argv, Config& cfg, std::string& err) {
     for (int i = 1; i < argc; ++i) {
         const std::string arg = argv[i];
-
         if (arg == "--help" || arg == "-h") {
             PrintUsage(argv[0]);
             return false;
@@ -83,23 +79,13 @@ bool ParseArgs(int argc, char** argv, Config& cfg, std::string& err) {
             continue;
         }
 
-        if (arg == "--raw") {
-            cfg.raw = true;
-            continue;
-        }
-
         if (arg == "--hex") {
             cfg.hex = true;
             continue;
         }
 
-        if (arg == "--strip-ansi") {
-            cfg.stripAnsi = true;
-            continue;
-        }
-
-        if (arg == "--no-strip-ansi") {
-            cfg.stripAnsi = false;
+        if (arg == "--ascii") {
+            cfg.ascii = true;
             continue;
         }
 
@@ -159,30 +145,7 @@ std::string MakeAsciiPreview(const uint8_t* data, size_t size) {
     return out;
 }
 
-std::string StripAnsiSequences(const std::string& input) {
-    std::string out;
-    out.reserve(input.size());
-
-    for (size_t i = 0; i < input.size(); ++i) {
-        const unsigned char ch = static_cast<unsigned char>(input[i]);
-        if (ch == 0x1B && (i + 1) < input.size() && input[i + 1] == '[') {
-            i += 2;
-            while (i < input.size()) {
-                const unsigned char c = static_cast<unsigned char>(input[i]);
-                if (c >= 0x40 && c <= 0x7E) {
-                    break;
-                }
-                ++i;
-            }
-            continue;
-        }
-        out.push_back(input[i]);
-    }
-
-    return out;
-}
-
-void PrintRawChunk(const uint8_t* data, DWORD size, bool showHex) {
+void PrintRx(const uint8_t* data, DWORD size, bool showHex, bool showAscii) {
     std::ostringstream oss;
     oss << "[RX] " << size << " bytes";
 
@@ -195,29 +158,13 @@ void PrintRawChunk(const uint8_t* data, DWORD size, bool showHex) {
             }
             oss << std::setw(2) << static_cast<unsigned int>(data[i]);
         }
-    } else {
+    }
+
+    if (showAscii) {
         oss << " | " << MakeAsciiPreview(data, size);
     }
 
     std::cout << oss.str() << "\n";
-}
-
-void ProcessLogBuffer(std::string& pending, const uint8_t* data, DWORD size, bool stripAnsi) {
-    pending.append(reinterpret_cast<const char*>(data), static_cast<size_t>(size));
-
-    size_t lineEnd = std::string::npos;
-    while ((lineEnd = pending.find("\r\n")) != std::string::npos) {
-        std::string line = pending.substr(0, lineEnd);
-        pending.erase(0, lineEnd + 2);
-
-        if (stripAnsi) {
-            line = StripAnsiSequences(line);
-        }
-
-        if (!line.empty()) {
-            std::cout << "[LOG] " << line << "\n";
-        }
-    }
 }
 
 BOOL WINAPI ConsoleHandler(DWORD signal) {
@@ -316,7 +263,6 @@ int main(int argc, char** argv) {
     std::cout << "[OK] Opened " << cfg.port << " @ " << cfg.baud << "\n";
 
     std::vector<uint8_t> buffer(1024);
-    std::string pendingLine;
     std::uint64_t statsBytes = 0;
     auto lastStats = std::chrono::steady_clock::now();
 
@@ -329,11 +275,7 @@ int main(int argc, char** argv) {
         }
 
         if (bytesRead > 0) {
-            if (cfg.raw) {
-                PrintRawChunk(buffer.data(), bytesRead, cfg.hex);
-            } else {
-                ProcessLogBuffer(pendingLine, buffer.data(), bytesRead, cfg.stripAnsi);
-            }
+            PrintRx(buffer.data(), bytesRead, cfg.hex, cfg.ascii);
             statsBytes += bytesRead;
         }
 

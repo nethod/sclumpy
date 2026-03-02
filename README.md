@@ -1,14 +1,11 @@
 # meshtastic_monitor
 
-`meshtastic_monitor` is a Windows C++17 console tool that opens a Meshtastic serial port and prints incoming data.
+`meshtastic_monitor` is a Windows C++17 console tool that opens a Meshtastic serial port and prints incoming bytes.
 
 ## Features
 
 - Native Win32 serial API (`CreateFile` on `\\.\COMx`), no external dependencies.
-- **Default readable log mode** with line buffering (`\r\n`) and `[LOG] ...` output.
-- ANSI color/format cleanup by default (`--strip-ansi` on), with `--no-strip-ansi` to preserve escape codes.
-- Optional raw receive mode (`--raw`) and optional hex dump (`--hex`).
-- Optional throughput stats (`--stats`) once per second.
+- Command-line options for port, baud rate, hex output, ASCII preview, and periodic throughput stats.
 - Graceful shutdown on `Ctrl+C`.
 - Non-blocking behavior with serial read timeouts (does not freeze when no data arrives).
 - Clear error messages when the port is missing or busy.
@@ -16,25 +13,22 @@
 ## Command line
 
 ```powershell
-meshtastic_monitor.exe --port COM5 --baud 115200 [--raw] [--hex] [--strip-ansi] [--no-strip-ansi] [--stats]
+meshtastic_monitor.exe --port COM5 --baud 115200 [--hex] [--ascii] [--stats]
 ```
 
 Options:
 
 - `--port COMx` (required)
 - `--baud <rate>` (optional, default `115200`)
-- `--raw` (optional, prints raw receive chunks instead of parsed log lines)
-- `--hex` (optional, prints hex dump of bytes; most useful with `--raw`)
-- `--strip-ansi` (optional, default on; removes ANSI escape sequences)
-- `--no-strip-ansi` (optional, preserves ANSI escape sequences)
+- `--hex` (optional, default enabled)
+- `--ascii` (optional)
 - `--stats` (optional, prints bytes/sec every second)
 
-Example output (default mode):
+Example output:
 
 ```text
 [OK] Opened COM5 @ 115200
-[LOG] DEBUG | 08:22:20 343601 [Router] Routing sniffing (...)
-[LOG] INFO | ...
+[RX] 64 bytes: 01 7A ... | .z..
 [STATS] 1024 bytes/sec
 ```
 
@@ -61,11 +55,8 @@ Binary output:
 ## Run
 
 ```powershell
-# Default readable log mode (ANSI stripped)
-.\build\Release\meshtastic_monitor.exe --port COM5 --baud 115200
-
-# Raw mode with hex dump
-.\build\Release\meshtastic_monitor.exe --port COM5 --baud 115200 --raw --hex
+# Example
+.\build\Release\meshtastic_monitor.exe --port COM5 --baud 115200 --ascii --stats
 ```
 
 If the COM port is wrong or already in use, the app prints a clear error and exits.
